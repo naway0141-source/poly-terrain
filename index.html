@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ポリゴン地形ジェネレーター & 風景シミュレーター</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Three.js (r128) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Google Fonts: Inter & Noto Sans JP -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', 'Noto Sans JP', sans-serif;
+      background-color: #090d16;
+    }
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* カスタムレンジスライダー */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.16);
+      border-radius: 9999px;
+      outline: none;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: 2px solid #ffffff;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+      cursor: pointer;
+      transition: transform 0.12s ease, background-color 0.12s ease;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.15);
+      background: #7dd3fc;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: 2px solid #ffffff;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+      cursor: pointer;
+    }
+
+    /* パネル内のカスタムスクロールバー */
+    .panel-scroll::-webkit-scrollbar {
+      width: 4px;
+    }
+    .panel-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .panel-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body>
+  <!-- 3D描画キャンバスコンテナ -->
+  <div id="canvas-container"></div>
+
+  <!-- 左上：タイトル＆シード情報バッジ -->
+  <div class="fixed top-4 left-4 z-10 pointer-events-none flex flex-col gap-1.5">
+    <div class="bg-slate-900/65 backdrop-blur-md border border-white/15 rounded-2xl px-4 py-2.5 shadow-xl">
+      <div class="flex items-center gap-2">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse"></span>
+        <h1 class="text-white font-bold text-sm sm:text-base tracking-wide">
+          POLY-TERRAIN <span class="text-sky-400 font-semibold">3D</span>
+        </h1>
+      </div>
+      <p class="text-slate-300 text-[11px] sm:text-xs mt-0.5">
+        プロシージャル地形ジェネレーター &amp; 風景シミュレーター
+      </p>
+      <div class="mt-1.5 pt-1.5 border-t border-white/10 flex items-center gap-3 text-[11px] text-slate-400 font-mono">
+        <span id="seed-display">SEED: #000000</span>
+        <span id="poly-display">POLY: 51,200</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右上：コントロールパネル（折りたたみ可能） -->
+  <aside id="control-panel" class="fixed top-4 right-4 z-20 w-[calc(100vw-2rem)] max-w-[320px] bg-slate-900/75 backdrop-blur-xl border border-white/15 rounded-2xl shadow-2xl text-slate-100 transition-all duration-300">
+    <!-- パネルヘッダー -->
+    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+        </svg>
+        <span class="font-semibold text-xs sm:text-sm tracking-wide">地形・環境コントロール</span>
+      </div>
+      <button id="toggle-panel-btn" type="button" aria-label="パネルの開閉" class="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 transition active:scale-95">
+        <svg id="toggle-icon" class="w-4 h-4 transition-transform duration-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- パネル本体 -->
+    <div id="panel-body" class="p-4 space-y-4 max-h-[calc(100vh-7rem)] overflow-y-auto panel-scroll">
+      <!-- 新しい地形を生成ボタン -->
+      <button id="btn-generate" type="button" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 hover:from-sky-400 hover:to-indigo-400 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-sky-500/25 flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <span>新しい地形を生成</span>
+      </button>
+
+      <!-- スライダー群 -->
+      <div class="space-y-3.5">
+        <!-- 起伏の高さ（山岳度） -->
+        <div class="space-y-1.5">
+          <div class="flex justify-between items-center text-xs">
+            <label for="slider-height" class="text-slate-300 font-medium">起伏の高さ（山岳度）</label>
+            <span id="val-height" class="font-mono text-sky-300 font-semibold">34 m</span>
+          </div>
+          <input id="slider-height" type="range" min="8" max="68" step="1" value="34" />
+        </div>
+
+        <!-- 地形の複雑さ（フラクタル粗さ） -->
+        <div class="space-y-1.5">
+          <div class="flex justify-between items-center text-xs">
+            <label for="slider-roughness" class="text-slate-300 font-medium">地形の複雑さ（フラクタル粗さ）</label>
+            <span id="val-roughness" class="font-mono text-sky-300 font-semibold">0.50</span>
+          </div>
+          <input id="slider-roughness" type="range" min="0.25" max="0.72" step="0.01" value="0.50" />
+        </div>
+
+        <!-- 海面水位（Water Level） -->
+        <div class="space-y-1.5">
+          <div class="flex justify-between items-center text-xs">
+            <label for="slider-water" class="text-slate-300 font-medium">海面水位（Water Level）</label>
+            <span id="val-water" class="font-mono text-sky-300 font-semibold">0.0 m</span>
+          </div>
+          <input id="slider-water" type="range" min="-14" max="22" step="0.5" value="0" />
+        </div>
+
+        <!-- 太陽の高度（時間帯） -->
+        <div class="space-y-1.5">
+          <div class="flex justify-between items-center text-xs">
+            <label for="slider-time" class="text-slate-300 font-medium">太陽の高度（時間帯）</label>
+            <span id="val-time" class="font-mono text-amber-300 font-semibold">09:30 朝〜昼</span>
+          </div>
+          <input id="slider-time" type="range" min="0" max="24" step="0.1" value="9.5" />
+        </div>
+      </div>
+
+      <!-- トグルスイッチ群 -->
+      <div class="pt-2 border-t border-white/10 space-y-2.5">
+        <!-- ポリゴン線（ワイヤーフレーム）重ね表示 -->
+        <label class="flex items-center justify-between cursor-pointer py-1">
+          <span class="text-xs text-slate-200 font-medium">ポリゴン線（ワイヤーフレーム）</span>
+          <div class="relative inline-flex items-center">
+            <input id="toggle-wireframe" type="checkbox" class="sr-only peer" />
+            <div class="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-500"></div>
+          </div>
+        </label>
+
+        <!-- カメラ飛行モード選択 -->
+        <div class="space-y-1.5 pt-1">
+          <div class="flex justify-between items-center text-xs">
+            <span class="text-slate-300 font-medium">カメラ飛行モード</span>
+            <span id="val-cammode" class="font-mono text-emerald-300 font-semibold">手動操作</span>
+          </div>
+          <div class="grid grid-cols-3 gap-1 bg-slate-950/60 p-1 rounded-xl border border-white/10">
+            <button type="button" data-cam-mode="manual" class="cam-mode-btn py-1.5 px-1 rounded-lg text-[11px] font-semibold bg-sky-500 text-white shadow transition cursor-pointer">
+              手動
+            </button>
+            <button type="button" data-cam-mode="orbit" class="cam-mode-btn py-1.5 px-1 rounded-lg text-[11px] font-medium text-slate-300 hover:text-white transition cursor-pointer">
+              周回軌道
+            </button>
+            <button type="button" data-cam-mode="freeflight" class="cam-mode-btn py-1.5 px-1 rounded-lg text-[11px] font-medium text-slate-300 hover:text-white transition cursor-pointer">
+              ランダム遊覧
+            </button>
+          </div>
+        </div>
+
+        <!-- 飛行スピードスライダー -->
+        <div id="flight-speed-group" class="space-y-1.5 opacity-50 transition-opacity">
+          <div class="flex justify-between items-center text-xs">
+            <label for="slider-speed" class="text-slate-300 font-medium">飛行スピード</label>
+            <span id="val-speed" class="font-mono text-emerald-300 font-semibold">1.0x</span>
+          </div>
+          <input id="slider-speed" type="range" min="0.2" max="3.0" step="0.1" value="1.0" />
+        </div>
+      </div>
+
+      <!-- 動画録画（REC）セクション -->
+      <div class="pt-2.5 border-t border-white/10 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+            <span id="rec-dot" class="inline-block w-2 h-2 rounded-full bg-slate-500"></span>
+            <span>風景ビデオ録画</span>
+          </span>
+          <span id="rec-timer" class="font-mono text-xs text-slate-400">00:00</span>
+        </div>
+
+        <!-- 録画中のUI非表示オプション -->
+        <label class="flex items-center justify-between cursor-pointer">
+          <span class="text-[11px] text-slate-300">録画中はHUDを隠す（シネマティック表示）</span>
+          <div class="relative inline-flex items-center">
+            <input id="toggle-clean-rec" type="checkbox" checked class="sr-only peer" />
+            <div class="w-9 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-rose-500"></div>
+          </div>
+        </label>
+
+        <!-- 録画開始 / 停止・保存ボタン -->
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btn-rec-start" type="button" class="py-2 px-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs shadow-lg shadow-rose-600/25 flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer">
+            <span class="w-2.5 h-2.5 rounded-full bg-white"></span>
+            <span>録画開始</span>
+          </button>
+          <button id="btn-rec-stop" type="button" disabled class="py-2 px-2.5 rounded-xl bg-slate-800 text-slate-500 font-semibold text-xs border border-white/10 flex items-center justify-center gap-1.5 transition cursor-not-allowed">
+            <span class="w-2.5 h-2.5 rounded-sm bg-current"></span>
+            <span>停止・保存</span>
+          </button>
+        </div>
+        <p id="rec-status-msg" class="text-[10px] text-slate-400 leading-relaxed">
+          ※ 3D映像のみがダイレクトに動画ファイルとして保存されます。
+        </p>
+      </div>
+
+      <!-- 視点リセットボタン -->
+      <div class="pt-1">
+        <button id="btn-reset-cam" type="button" class="w-full py-2 px-3 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 text-xs font-medium transition active:scale-[0.98] cursor-pointer">
+          カメラ視点をリセット
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- クリーン録画モード中のフローティング停止ピル -->
+  <div id="clean-rec-pill" class="hidden fixed bottom-5 right-5 z-30">
+    <button id="btn-clean-rec-stop" type="button" class="flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-slate-950/80 hover:bg-rose-950/90 backdrop-blur-md border border-rose-500/50 text-white text-xs font-semibold shadow-2xl transition active:scale-95 cursor-pointer">
+      <span class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+      <span id="clean-rec-timer" class="font-mono text-rose-200">REC 00:00</span>
+      <span class="px-2 py-0.5 rounded-full bg-rose-600 text-[11px]">停止・保存</span>
+    </button>
+  </div>
+
+  <!-- 左下：操作ガイド -->
+  <div id="hud-guide" class="fixed bottom-4 left-4 z-10 pointer-events-none transition-opacity duration-300">
+    <div class="bg-slate-900/60 backdrop-blur-md border border-white/15 rounded-2xl px-3.5 py-2 text-[11px] sm:text-xs text-slate-300 shadow-lg">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span class="flex items-center gap-1">
+          <strong class="text-sky-300 font-semibold">左ドラッグ / 1本指:</strong> 回転
+        </span>
+        <span class="text-white/20">|</span>
+        <span class="flex items-center gap-1">
+          <strong class="text-sky-300 font-semibold">ホイール / ピンチ:</strong> ズーム
+        </span>
+        <span class="text-white/20">|</span>
+        <span class="flex items-center gap-1">
+          <strong class="text-sky-300 font-semibold">右ドラッグ / 2本指:</strong> 平行移動
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * シード付き2D Simplexノイズ生成器
+     * 外部ノイズライブラリに依存せず高速かつ滑らかなフラクタル地形を生成する
+     */
+    class SeededSimplexNoise {
+      constructor(seed = 12345) {
+        this.grad3 = [
+          [1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
+          [1, 0, 1], [-1, 0, 1], [1, 0, -1], [-1, 0, -1],
+          [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]
+        ];
+        this.p = new Uint8Array(256);
+        for (let i = 0; i < 256; i++) {
+          this.p[i] = i;
+        }
+        // Mulberry32 擬似乱数で順列テーブルをシャッフル
+        let s = seed >>> 0;
+        const rand = () => {
+          s += 0x6D2B79F5;
+          let t = Math.imul(s ^ (s >>> 15), 1 | s);
+          t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        for (let i = 255; i > 0; i--) {
+          const j = Math.floor(rand() * (i + 1));
+          const tmp = this.p[i];
+          this.p[i] = this.p[j];
+          this.p[j] = tmp;
+        }
+        this.perm = new Uint8Array(512);
+        this.permMod12 = new Uint8Array(512);
+        for (let i = 0; i < 512; i++) {
+          this.perm[i] = this.p[i & 255];
+          this.permMod12[i] = this.perm[i] % 12;
+        }
+      }
+
+      noise2D(xin, yin) {
+        const F2 = 0.5 * (Math.sqrt(3.0) - 1.0);
+        const G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
+        let n0, n1, n2;
+
+        const s = (xin + yin) * F2;
+        const i = Math.floor(xin + s);
+        const j = Math.floor(yin + s);
+        const t = (i + j) * G2;
+        const X0 = i - t;
+        const Y0 = j - t;
+        const x0 = xin - X0;
+        const y0 = yin - Y0;
+
+        let i1, j1;
+        if (x0 > y0) {
+          i1 = 1; j1 = 0;
+        } else {
+          i1 = 0; j1 = 1;
+        }
+
+        const x1 = x0 - i1 + G2;
+        const y1 = y0 - j1 + G2;
+        const x2 = x0 - 1.0 + 2.0 * G2;
+        const y2 = y0 - 1.0 + 2.0 * G2;
+
+        const ii = i & 255;
+        const jj = j & 255;
+        const gi0 = this.permMod12[ii + this.perm[jj]];
+        const gi1 = this.permMod12[ii + i1 + this.perm[jj + j1]];
+        const gi2 = this.permMod12[ii + 1 + this.perm[jj + 1]];
+
+        let t0 = 0.5 - x0 * x0 - y0 * y0;
+        if (t0 < 0) {
+          n0 = 0.0;
+        } else {
+          t0 *= t0;
+          n0 = t0 * t0 * (this.grad3[gi0][0] * x0 + this.grad3[gi0][1] * y0);
+        }
+
+        let t1 = 0.5 - x1 * x1 - y1 * y1;
+        if (t1 < 0) {
+          n1 = 0.0;
+        } else {
+          t1 *= t1;
+          n1 = t1 * t1 * (this.grad3[gi1][0] * x1 + this.grad3[gi1][1] * y1);
+        }
+
+        let t2 = 0.5 - x2 * x2 - y2 * y2;
+        if (t2 < 0) {
+          n2 = 0.0;
+        } else {
+          t2 *= t2;
+          n2 = t2 * t2 * (this.grad3[gi2][0] * x2 + this.grad3[gi2][1] * y2);
+        }
+
+        return 70.0 * (n0 + n1 + n2);
+      }
+    }
+
+    // グローバル状態管理
+    const state = {
+      seed: Math.floor(Math.random() * 900000) + 100000,
+      worldSize: 240,
+      segments: 160,
+      heightScale: 34,
+      roughness: 0.50,
+      waterLevel: 0.0,
+      timeOfDay: 9.5,
+      wireframe: false,
+      cameraMode: 'manual', // 'manual' | 'orbit' | 'freeflight'
+      flightSpeed: 1.0,
+      cleanRec: true
+    };
+
+    // Three.js コアオブジェクト
+    let scene, camera, renderer;
+    let terrainMesh, terrainGeometry, wireframeMesh, waterMesh;
+    let sunLight, hemiLight, ambientLight, sunSphere;
+    let noiseGen = new SeededSimplexNoise(state.seed);
+    let rawHeights = null; // 正規化済み標高データを保持（水位や高さ変更を高速化）
+
+    // ランダム遊覧飛行（ドローン／グライダー）状態管理
+    const freeFlight = {
+      pos: new THREE.Vector3(0, 32, 75),
+      vel: new THREE.Vector3(0, 0, -1),
+      lookTarget: new THREE.Vector3(0, 10, 0),
+      waypoint: new THREE.Vector3(35, 25, -35),
+      heading: Math.PI,
+      bankAngle: 0,
+      waypointTimer: 0
+    };
+
+    // 動画録画（MediaRecorder）状態管理
+    const recorderState = {
+      mediaRecorder: null,
+      chunks: [],
+      isRecording: false,
+      startTime: 0,
+      timerInterval: null
+    };
+
+    // カメラ軌道制御パラメータ（球面座標）
+    const camCtrl = {
+      target: new THREE.Vector3(0, 6, 0),
+      radius: 145,
+      theta: Math.PI * 0.25,
+      phi: Math.PI * 0.31,
+      minRadius: 22,
+      maxRadius: 270,
+      minPhi: 0.08,
+      maxPhi: Math.PI * 0.485,
+      isDragging: false,
+      dragMode: 'rotate', // 'rotate' | 'pan'
+      prevX: 0,
+      prevY: 0,
+      pinchDist: 0
+    };
+
+    // カラーパレット定義（頂点カラー用）
+    const PALETTE = {
+      deepSea:   new THREE.Color(0x0c2d48),
+      shallow:   new THREE.Color(0x1f7a8c),
+      sand:      new THREE.Color(0xe6cfa1),
+      grass:     new THREE.Color(0x4f8a42),
+      forest:    new THREE.Color(0x285430),
+      rock:      new THREE.Color(0x6e6a66),
+      snow:      new THREE.Color(0xf4f8fb)
+    };
+
+    // 空・太陽・霧のキーフレーム定義
+    const SKY_KEYFRAMES = [
+      { time: 0.0,  sky: 0x060a14, fog: 0x091020, sunColor: 0x5c7cfa, sunInt: 0.28, hemiSky: 0x1b264f, hemiGround: 0x05070d, hemiInt: 0.35 },
+      { time: 4.5,  sky: 0x0e172a, fog: 0x16223d, sunColor: 0x6b8cce, sunInt: 0.32, hemiSky: 0x26355e, hemiGround: 0x090c14, hemiInt: 0.40 },
+      { time: 6.0,  sky: 0xff7b54, fog: 0xff9b71, sunColor: 0xffa94d, sunInt: 1.05, hemiSky: 0xffb38a, hemiGround: 0x3b2c35, hemiInt: 0.65 },
+      { time: 7.5,  sky: 0x6eb6ff, fog: 0x9fd0ff, sunColor: 0xfff3d6, sunInt: 1.25, hemiSky: 0x99ccff, hemiGround: 0x42523a, hemiInt: 0.72 },
+      { time: 12.0, sky: 0x4fa3ff, fog: 0x8ec8ff, sunColor: 0xffffff, sunInt: 1.38, hemiSky: 0xb5dcff, hemiGround: 0x4a5d3f, hemiInt: 0.78 },
+      { time: 16.5, sky: 0x6aa8f7, fog: 0xa2c8fa, sunColor: 0xffe8c2, sunInt: 1.22, hemiSky: 0x99c2ff, hemiGround: 0x434d39, hemiInt: 0.70 },
+      { time: 18.0, sky: 0xe85a3c, fog: 0xf27d52, sunColor: 0xff6b35, sunInt: 1.05, hemiSky: 0xff8c66, hemiGround: 0x2e1f2b, hemiInt: 0.60 },
+      { time: 19.5, sky: 0x181d38, fog: 0x1e2547, sunColor: 0x748ffc, sunInt: 0.35, hemiSky: 0x2b3666, hemiGround: 0x0a0d17, hemiInt: 0.42 },
+      { time: 24.0, sky: 0x060a14, fog: 0x091020, sunColor: 0x5c7cfa, sunInt: 0.28, hemiSky: 0x1b264f, hemiGround: 0x05070d, hemiInt: 0.35 }
+    ];
+
+    /**
+     * 初期化メイン処理
+     */
+    function init() {
+      const container = document.getElementById('canvas-container');
+
+      // シーン＆フォグ
+      scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x8ec8ff, 0.0036);
+
+      // カメラ
+      camera = new THREE.PerspectiveCamera(48, container.clientWidth / container.clientHeight, 0.5, 1000);
+      updateCameraTransform();
+
+      // レンダラー
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      // ライティング構築
+      setupLights();
+
+      // 地形＆水面メッシュ構築
+      createTerrainAndWater();
+
+      // UIイベント登録
+      setupUI();
+
+      // カメラ操作イベント登録
+      setupControls(renderer.domElement);
+
+      // リサイズイベント
+      window.addEventListener('resize', onWindowResize);
+
+      // 初期時間帯のライティング反映
+      updateAtmosphere();
+      updateSeedDisplay();
+    }
+
+    /**
+     * ライティングと天体（太陽/月）のセットアップ
+     */
+    function setupLights() {
+      ambientLight = new THREE.AmbientLight(0xffffff, 0.18);
+      scene.add(ambientLight);
+
+      hemiLight = new THREE.HemisphereLight(0xb5dcff, 0x4a5d3f, 0.75);
+      scene.add(hemiLight);
+
+      sunLight = new THREE.DirectionalLight(0xffffff, 1.35);
+      sunLight.position.set(80, 120, 60);
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.width = 2048;
+      sunLight.shadow.mapSize.height = 2048;
+      const d = 135;
+      sunLight.shadow.camera.left = -d;
+      sunLight.shadow.camera.right = d;
+      sunLight.shadow.camera.top = d;
+      sunLight.shadow.camera.bottom = -d;
+      sunLight.shadow.camera.near = 10;
+      sunLight.shadow.camera.far = 420;
+      sunLight.shadow.bias = -0.0005;
+      scene.add(sunLight);
+
+      // 空に浮かぶ太陽・月オブジェクト
+      const sunGeo = new THREE.SphereGeometry(7, 16, 16);
+      const sunMat = new THREE.MeshBasicMaterial({ color: 0xfff5d6, fog: false });
+      sunSphere = new THREE.Mesh(sunGeo, sunMat);
+      scene.add(sunSphere);
+    }
+
+    /**
+     * 地形メッシュ・ワイヤーフレーム・水面メッシュの初期作成
+     */
+    function createTerrainAndWater() {
+      const { worldSize, segments } = state;
+      terrainGeometry = new THREE.PlaneBufferGeometry(worldSize, worldSize, segments, segments);
+      terrainGeometry.rotateX(-Math.PI / 2);
+
+      const vertexCount = terrainGeometry.attributes.position.count;
+      rawHeights = new Float32Array(vertexCount);
+      const colors = new Float32Array(vertexCount * 3);
+      terrainGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+      // フラットシェーディングによるポリゴン感の強調
+      const terrainMat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        flatShading: true,
+        roughness: 0.86,
+        metalness: 0.06
+      });
+
+      terrainMesh = new THREE.Mesh(terrainGeometry, terrainMat);
+      terrainMesh.receiveShadow = true;
+      terrainMesh.castShadow = true;
+      scene.add(terrainMesh);
+
+      // レトロポリゴン風ワイヤーフレームオーバーレイ
+      const wireMat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.22
+      });
+      wireframeMesh = new THREE.Mesh(terrainGeometry, wireMat);
+      wireframeMesh.visible = state.wireframe;
+      wireframeMesh.position.y = 0.08;
+      scene.add(wireframeMesh);
+
+      // 半透明・反射感のある水面メッシュ
+      const waterGeo = new THREE.PlaneBufferGeometry(worldSize, worldSize, 1, 1);
+      waterGeo.rotateX(-Math.PI / 2);
+      const waterMat = new THREE.MeshPhongMaterial({
+        color: 0x0ea5e9,
+        emissive: 0x042f49,
+        specular: 0xdbeafe,
+        shininess: 95,
+        transparent: true,
+        opacity: 0.78,
+        flatShading: true
+      });
+      waterMesh = new THREE.Mesh(waterGeo, waterMat);
+      waterMesh.position.y = state.waterLevel;
+      waterMesh.receiveShadow = true;
+      scene.add(waterMesh);
+
+      // 初回ノイズ計算とメッシュ反映
+      computeNoiseField();
+      applyTerrainGeometry();
+    }
+
+    /**
+     * fBm（フラクタルブラウン運動）による正規化標高データの計算
+     */
+    function computeNoiseField() {
+      noiseGen = new SeededSimplexNoise(state.seed);
+      const posAttr = terrainGeometry.attributes.position;
+      const count = posAttr.count;
+      const octaves = 6;
+      const baseFreq = 0.0115;
+      const persistence = state.roughness;
+      const lacunarity = 2.08;
+
+      for (let i = 0; i < count; i++) {
+        const x = posAttr.getX(i);
+        const z = posAttr.getZ(i);
+
+        let amplitude = 1.0;
+        let frequency = baseFreq;
+        let noiseSum = 0.0;
+        let maxAmp = 0.0;
+
+        for (let o = 0; o < octaves; o++) {
+          noiseSum += noiseGen.noise2D(x * frequency, z * frequency) * amplitude;
+          maxAmp += amplitude;
+          amplitude *= persistence;
+          frequency *= lacunarity;
+        }
+
+        // [-1, 1] -> [0, 1] に正規化し、山岳らしいリッジ感（累乗カーブ）を付与
+        let n = (noiseSum / maxAmp) * 0.5 + 0.5;
+        // 中心付近に緩やかな島・山脈のまとまりを持たせる軽微なフォールオフ
+        const distNorm = Math.hypot(x, z) / (state.worldSize * 0.62);
+        const falloff = Math.max(0, 1 - Math.pow(distNorm, 2.6) * 0.48);
+        n = Math.pow(n, 1.38) * falloff;
+
+        // [-0.35, 0.85] 付近のレンジへマッピング
+        rawHeights[i] = n * 1.35 - 0.32;
+      }
+    }
+
+    /**
+     * 現在の高さ倍率・海面水位に基づいて頂点Y座標と頂点カラーを更新
+     */
+    function applyTerrainGeometry() {
+      const posAttr = terrainGeometry.attributes.position;
+      const colorAttr = terrainGeometry.attributes.color;
+      const count = posAttr.count;
+      const hScale = state.heightScale;
+      const waterY = state.waterLevel;
+      const tempColor = new THREE.Color();
+
+      for (let i = 0; i < count; i++) {
+        const y = rawHeights[i] * hScale;
+        posAttr.setY(i, y);
+
+        // 水面からの相対標高に応じてバイオーム色を滑らかに補間
+        const relH = y - waterY;
+
+        if (relH < -6.0) {
+          tempColor.copy(PALETTE.deepSea);
+        } else if (relH < 0.0) {
+          const t = (relH + 6.0) / 6.0;
+          tempColor.lerpColors(PALETTE.deepSea, PALETTE.shallow, t);
+        } else if (relH < 1.8) {
+          const t = relH / 1.8;
+          tempColor.lerpColors(PALETTE.shallow, PALETTE.sand, Math.min(1, t * 1.4));
+        } else if (relH < 8.5) {
+          const t = (relH - 1.8) / 6.7;
+          tempColor.lerpColors(PALETTE.sand, PALETTE.grass, Math.min(1, t * 1.5));
+        } else if (relH < 17.5) {
+          const t = (relH - 8.5) / 9.0;
+          tempColor.lerpColors(PALETTE.grass, PALETTE.forest, t);
+        } else if (relH < 26.5) {
+          const t = (relH - 17.5) / 9.0;
+          tempColor.lerpColors(PALETTE.forest, PALETTE.rock, t);
+        } else if (relH < 33.0) {
+          const t = (relH - 26.5) / 6.5;
+          tempColor.lerpColors(PALETTE.rock, PALETTE.snow, t);
+        } else {
+          tempColor.copy(PALETTE.snow);
+        }
+
+        colorAttr.setXYZ(i, tempColor.r, tempColor.g, tempColor.b);
+      }
+
+      posAttr.needsUpdate = true;
+      colorAttr.needsUpdate = true;
+      terrainGeometry.computeVertexNormals();
+
+      waterMesh.position.y = waterY;
+    }
+
+    /**
+     * ワールド座標 (x, z) における現在の地形標高（水面以下なら水面高さ）をバイリニア補間で取得
+     */
+    function getTerrainHeight(x, z) {
+      if (!rawHeights) return Math.max(0, state.waterLevel);
+      const { worldSize, segments, heightScale, waterLevel } = state;
+      const half = worldSize * 0.5;
+
+      const fx = Math.max(0, Math.min(segments - 0.001, ((x + half) / worldSize) * segments));
+      const fz = Math.max(0, Math.min(segments - 0.001, ((z + half) / worldSize) * segments));
+
+      const ix = Math.floor(fx);
+      const iz = Math.floor(fz);
+      const tx = fx - ix;
+      const tz = fz - iz;
+
+      const rowStride = segments + 1;
+      const h00 = rawHeights[iz * rowStride + ix] * heightScale;
+      const h10 = rawHeights[iz * rowStride + (ix + 1)] * heightScale;
+      const h01 = rawHeights[(iz + 1) * rowStride + ix] * heightScale;
+      const h11 = rawHeights[(iz + 1) * rowStride + (ix + 1)] * heightScale;
+
+      const h0 = h00 * (1 - tx) + h10 * tx;
+      const h1 = h01 * (1 - tx) + h11 * tx;
+      const groundH = h0 * (1 - tz) + h1 * tz;
+
+      return Math.max(groundH, waterLevel);
+    }
+
+    /**
+     * ランダム遊覧飛行の初期化（現在のカメラ位置からシームレスに発進）
+     */
+    function initFreeFlightFromCamera() {
+      freeFlight.pos.copy(camera.position);
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      freeFlight.heading = Math.atan2(dir.x, dir.z);
+      freeFlight.bankAngle = 0;
+      freeFlight.waypointTimer = 0;
+      pickNextFlightWaypoint();
+    }
+
+    /**
+     * 次の遊覧ウェイポイントを地形内にランダム設定
+     */
+    function pickNextFlightWaypoint() {
+      const bound = state.worldSize * 0.34;
+      const wx = (Math.random() * 2 - 1) * bound;
+      const wz = (Math.random() * 2 - 1) * bound;
+      const ground = getTerrainHeight(wx, wz);
+      // 谷間すれすれの低空飛行〜山頂見下ろしまで変化をつける
+      const clearance = 8 + Math.random() * 22;
+      freeFlight.waypoint.set(wx, ground + clearance, wz);
+      freeFlight.waypointTimer = 5.0 + Math.random() * 5.0;
+    }
+
+    /**
+     * ランダム遊覧飛行のフレーム更新（地形追従・旋回バンク角・滑らかな視線制御）
+     */
+    function updateFreeFlight(dt, elapsedSec) {
+      const speed = 15.0 * state.flightSpeed;
+      freeFlight.waypointTimer -= dt;
+
+      const toTargetX = freeFlight.waypoint.x - freeFlight.pos.x;
+      const toTargetZ = freeFlight.waypoint.z - freeFlight.pos.z;
+      const distXZ = Math.hypot(toTargetX, toTargetZ);
+
+      // ウェイポイント到達、一定時間経過、またはマップ外縁に近づいたら新目標を設定
+      const edgeLimit = state.worldSize * 0.40;
+      if (
+        distXZ < 22 ||
+        freeFlight.waypointTimer <= 0 ||
+        Math.abs(freeFlight.pos.x) > edgeLimit ||
+        Math.abs(freeFlight.pos.z) > edgeLimit
+      ) {
+        pickNextFlightWaypoint();
+      }
+
+      // 目標方位角への滑らかな旋回計算
+      const desiredHeading = Math.atan2(
+        freeFlight.waypoint.x - freeFlight.pos.x,
+        freeFlight.waypoint.z - freeFlight.pos.z
+      );
+      let angleDiff = desiredHeading - freeFlight.heading;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+      // 微細な風のゆらぎを加えて単調さを消す
+      const wander = Math.sin(elapsedSec * 0.7) * 0.14 + Math.cos(elapsedSec * 0.31) * 0.1;
+      const turnRate = Math.max(-0.85, Math.min(0.85, angleDiff * 1.15 + wander));
+      freeFlight.heading += turnRate * dt * Math.max(0.6, state.flightSpeed * 0.85);
+
+      // 水平移動
+      const forwardX = Math.sin(freeFlight.heading);
+      const forwardZ = Math.cos(freeFlight.heading);
+      freeFlight.pos.x += forwardX * speed * dt;
+      freeFlight.pos.z += forwardZ * speed * dt;
+
+      // 前方サンプリングによる地形衝突回避（先読み高度計算）
+      let maxAheadGround = getTerrainHeight(freeFlight.pos.x, freeFlight.pos.z);
+      for (let step = 1; step <= 4; step++) {
+        const probeDist = step * 11;
+        const px = freeFlight.pos.x + forwardX * probeDist;
+        const pz = freeFlight.pos.z + forwardZ * probeDist;
+        maxAheadGround = Math.max(maxAheadGround, getTerrainHeight(px, pz));
+      }
+
+      // 地形起伏に沿った目標高度（最低でも地表/水面 + 6.5m を確保）
+      const waveAlt = Math.sin(elapsedSec * 0.45) * 4.5;
+      const safeMinY = maxAheadGround + 6.5;
+      const desiredY = Math.max(safeMinY, Math.min(freeFlight.waypoint.y + waveAlt, safeMinY + 24));
+      freeFlight.pos.y += (desiredY - freeFlight.pos.y) * Math.min(1, dt * 2.4);
+
+      // 進行方向前方やや下向きの注視点を補間
+      const lookAheadDist = 42;
+      const lookX = freeFlight.pos.x + forwardX * lookAheadDist;
+      const lookZ = freeFlight.pos.z + forwardZ * lookAheadDist;
+      const lookGround = getTerrainHeight(lookX, lookZ);
+      const desiredLookY = Math.max(lookGround + 2.0, freeFlight.pos.y - 7.5);
+
+      freeFlight.lookTarget.x += (lookX - freeFlight.lookTarget.x) * Math.min(1, dt * 4.0);
+      freeFlight.lookTarget.y += (desiredLookY - freeFlight.lookTarget.y) * Math.min(1, dt * 3.0);
+      freeFlight.lookTarget.z += (lookZ - freeFlight.lookTarget.z) * Math.min(1, dt * 4.0);
+
+      // 旋回に応じたグライダー風のロール（バンク角）
+      const targetBank = -turnRate * 0.28;
+      freeFlight.bankAngle += (targetBank - freeFlight.bankAngle) * Math.min(1, dt * 3.5);
+
+      camera.position.copy(freeFlight.pos);
+      camera.up.set(
+        Math.sin(freeFlight.bankAngle) * Math.cos(freeFlight.heading),
+        Math.cos(freeFlight.bankAngle),
+        -Math.sin(freeFlight.bankAngle) * Math.sin(freeFlight.heading)
+      );
+      camera.lookAt(freeFlight.lookTarget);
+    }
+
+    /**
+     * 時間帯（太陽高度）に応じた空・太陽光・霧のカラーと角度の更新
+     */
+    function updateAtmosphere() {
+      const t = state.timeOfDay;
+
+      // キーフレーム補間
+      let k0 = SKY_KEYFRAMES[0];
+      let k1 = SKY_KEYFRAMES[SKY_KEYFRAMES.length - 1];
+      for (let i = 0; i < SKY_KEYFRAMES.length - 1; i++) {
+        if (t >= SKY_KEYFRAMES[i].time && t <= SKY_KEYFRAMES[i + 1].time) {
+          k0 = SKY_KEYFRAMES[i];
+          k1 = SKY_KEYFRAMES[i + 1];
+          break;
+        }
+      }
+      const span = Math.max(0.0001, k1.time - k0.time);
+      const alpha = (t - k0.time) / span;
+
+      const skyColor = new THREE.Color(k0.sky).lerp(new THREE.Color(k1.sky), alpha);
+      const fogColor = new THREE.Color(k0.fog).lerp(new THREE.Color(k1.fog), alpha);
+      const sunCol = new THREE.Color(k0.sunColor).lerp(new THREE.Color(k1.sunColor), alpha);
+      const hSky = new THREE.Color(k0.hemiSky).lerp(new THREE.Color(k1.hemiSky), alpha);
+      const hGround = new THREE.Color(k0.hemiGround).lerp(new THREE.Color(k1.hemiGround), alpha);
+
+      renderer.setClearColor(skyColor);
+      scene.fog.color.copy(fogColor);
+
+      sunLight.color.copy(sunCol);
+      sunLight.intensity = k0.sunInt + (k1.sunInt - k0.sunInt) * alpha;
+
+      hemiLight.color.copy(hSky);
+      hemiLight.groundColor.copy(hGround);
+      hemiLight.intensity = k0.hemiInt + (k1.hemiInt - k0.hemiInt) * alpha;
+
+      // 太陽／月の軌道座標計算（6時が日の出、12時が南中、18時が日の入り）
+      const dayAngle = ((t - 6.0) / 12.0) * Math.PI;
+      const isNight = t < 5.6 || t > 18.4;
+      const orbitAngle = isNight ? dayAngle + Math.PI : dayAngle;
+
+      const dist = 190;
+      const elevation = Math.sin(orbitAngle);
+      const horizontal = Math.cos(orbitAngle);
+
+      const sx = horizontal * dist * 0.85;
+      const sy = Math.max(14, elevation * dist);
+      const sz = dist * 0.45;
+
+      sunLight.position.set(sx, sy, sz);
+      sunSphere.position.set(sx * 1.4, elevation * dist * 1.4, sz * 1.4);
+      sunSphere.material.color.copy(sunCol);
+
+      // 水面の反射色も空に合わせて調整
+      waterMesh.material.specular.copy(sunCol);
+    }
+
+    /**
+     * 球面座標からカメラの位置と向きを更新
+     */
+    function updateCameraTransform() {
+      camera.up.set(0, 1, 0);
+      const sinPhi = Math.sin(camCtrl.phi);
+      const cosPhi = Math.cos(camCtrl.phi);
+      const sinTheta = Math.sin(camCtrl.theta);
+      const cosTheta = Math.cos(camCtrl.theta);
+
+      camera.position.x = camCtrl.target.x + camCtrl.radius * sinPhi * sinTheta;
+      camera.position.y = camCtrl.target.y + camCtrl.radius * cosPhi;
+      camera.position.z = camCtrl.target.z + camCtrl.radius * sinPhi * cosTheta;
+      camera.lookAt(camCtrl.target);
+    }
+
+    /**
+     * カメラモード切替処理
+     */
+    function setCameraMode(mode) {
+      state.cameraMode = mode;
+      const modeLabels = {
+        manual: '手動操作',
+        orbit: '周回軌道',
+        freeflight: 'ランダム遊覧'
+      };
+      document.getElementById('val-cammode').textContent = modeLabels[mode] || '手動操作';
+
+      document.querySelectorAll('.cam-mode-btn').forEach((btn) => {
+        const isActive = btn.dataset.camMode === mode;
+        btn.classList.toggle('bg-sky-500', isActive);
+        btn.classList.toggle('text-white', isActive);
+        btn.classList.toggle('font-semibold', isActive);
+        btn.classList.toggle('shadow', isActive);
+        btn.classList.toggle('text-slate-300', !isActive);
+        btn.classList.toggle('font-medium', !isActive);
+      });
+
+      const speedGroup = document.getElementById('flight-speed-group');
+      speedGroup.classList.toggle('opacity-50', mode === 'manual');
+
+      if (mode === 'freeflight') {
+        initFreeFlightFromCamera();
+      } else if (mode === 'manual') {
+        camera.up.set(0, 1, 0);
+      }
+    }
+
+    /**
+     * マウス＆タッチカメラ操作イベントの設定
+     */
+    function setupControls(domElement) {
+      // 右クリックメニュー抑止
+      domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      // マウスダウン（手動操作時は即座にマニュアルへ復帰）
+      domElement.addEventListener('mousedown', (e) => {
+        if (state.cameraMode !== 'manual') {
+          setCameraMode('manual');
+        }
+        camCtrl.isDragging = true;
+        camCtrl.prevX = e.clientX;
+        camCtrl.prevY = e.clientY;
+        camCtrl.dragMode = (e.button === 2 || e.button === 1 || e.shiftKey) ? 'pan' : 'rotate';
+      });
+
+      // マウスムーブ
+      window.addEventListener('mousemove', (e) => {
+        if (!camCtrl.isDragging) return;
+        const dx = e.clientX - camCtrl.prevX;
+        const dy = e.clientY - camCtrl.prevY;
+        camCtrl.prevX = e.clientX;
+        camCtrl.prevY = e.clientY;
+
+        if (camCtrl.dragMode === 'rotate') {
+          camCtrl.theta -= dx * 0.0065;
+          camCtrl.phi = Math.max(camCtrl.minPhi, Math.min(camCtrl.maxPhi, camCtrl.phi - dy * 0.0065));
+        } else {
+          panCamera(dx, dy);
+        }
+        updateCameraTransform();
+      });
+
+      // マウスアップ
+      window.addEventListener('mouseup', () => {
+        camCtrl.isDragging = false;
+      });
+
+      // ホイールズーム
+      domElement.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomFactor = e.deltaY > 0 ? 1.08 : 0.92;
+        camCtrl.radius = Math.max(camCtrl.minRadius, Math.min(camCtrl.maxRadius, camCtrl.radius * zoomFactor));
+        updateCameraTransform();
+      }, { passive: false });
+
+      // タッチ操作（1本指回転・2本指ズーム＆パン）
+      domElement.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+          camCtrl.isDragging = true;
+          camCtrl.dragMode = 'rotate';
+          camCtrl.prevX = e.touches[0].clientX;
+          camCtrl.prevY = e.touches[0].clientY;
+        } else if (e.touches.length === 2) {
+          camCtrl.isDragging = true;
+          camCtrl.dragMode = 'pinch';
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          camCtrl.pinchDist = Math.hypot(dx, dy);
+          camCtrl.prevX = (e.touches[0].clientX + e.touches[1].clientX) * 0.5;
+          camCtrl.prevY = (e.touches[0].clientY + e.touches[1].clientY) * 0.5;
+        }
+      }, { passive: false });
+
+      domElement.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (!camCtrl.isDragging) return;
+
+        if (e.touches.length === 1 && camCtrl.dragMode === 'rotate') {
+          const dx = e.touches[0].clientX - camCtrl.prevX;
+          const dy = e.touches[0].clientY - camCtrl.prevY;
+          camCtrl.prevX = e.touches[0].clientX;
+          camCtrl.prevY = e.touches[0].clientY;
+
+          camCtrl.theta -= dx * 0.0075;
+          camCtrl.phi = Math.max(camCtrl.minPhi, Math.min(camCtrl.maxPhi, camCtrl.phi - dy * 0.0075));
+          updateCameraTransform();
+        } else if (e.touches.length === 2) {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          const dist = Math.hypot(dx, dy);
+          const midX = (e.touches[0].clientX + e.touches[1].clientX) * 0.5;
+          const midY = (e.touches[0].clientY + e.touches[1].clientY) * 0.5;
+
+          if (camCtrl.pinchDist > 0) {
+            const scale = camCtrl.pinchDist / dist;
+            camCtrl.radius = Math.max(camCtrl.minRadius, Math.min(camCtrl.maxRadius, camCtrl.radius * scale));
+          }
+          panCamera(midX - camCtrl.prevX, midY - camCtrl.prevY);
+
+          camCtrl.pinchDist = dist;
+          camCtrl.prevX = midX;
+          camCtrl.prevY = midY;
+          updateCameraTransform();
+        }
+      }, { passive: false });
+
+      domElement.addEventListener('touchend', () => {
+        camCtrl.isDragging = false;
+        camCtrl.pinchDist = 0;
+      });
+    }
+
+    /**
+     * カメラの平行移動（パン）計算
+     */
+    function panCamera(dx, dy) {
+      const panSpeed = camCtrl.radius * 0.0014;
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      forward.y = 0;
+      forward.normalize();
+
+      const right = new THREE.Vector3();
+      right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+      camCtrl.target.addScaledVector(right, -dx * panSpeed);
+      camCtrl.target.addScaledVector(forward, dy * panSpeed);
+
+      // マップ外への行き過ぎを制限
+      const limit = state.worldSize * 0.45;
+      camCtrl.target.x = Math.max(-limit, Math.min(limit, camCtrl.target.x));
+      camCtrl.target.z = Math.max(-limit, Math.min(limit, camCtrl.target.z));
+    }
+
+    /**
+     * UIコントロールとイベントバインド
+     */
+    function setupUI() {
+      // パネル開閉
+      const toggleBtn = document.getElementById('toggle-panel-btn');
+      const panelBody = document.getElementById('panel-body');
+      const toggleIcon = document.getElementById('toggle-icon');
+      let isCollapsed = false;
+
+      toggleBtn.addEventListener('click', () => {
+        isCollapsed = !isCollapsed;
+        panelBody.classList.toggle('hidden', isCollapsed);
+        toggleIcon.style.transform = isCollapsed ? 'rotate(180deg)' : 'rotate(0deg)';
+      });
+
+      // 新しい地形を生成
+      document.getElementById('btn-generate').addEventListener('click', () => {
+        state.seed = Math.floor(Math.random() * 900000) + 100000;
+        computeNoiseField();
+        applyTerrainGeometry();
+        updateSeedDisplay();
+      });
+
+      // 起伏の高さスライダー
+      const sliderHeight = document.getElementById('slider-height');
+      const valHeight = document.getElementById('val-height');
+      sliderHeight.addEventListener('input', (e) => {
+        state.heightScale = parseFloat(e.target.value);
+        valHeight.textContent = `${state.heightScale} m`;
+        applyTerrainGeometry();
+      });
+
+      // 地形の複雑さ（フラクタル粗さ）スライダー
+      const sliderRoughness = document.getElementById('slider-roughness');
+      const valRoughness = document.getElementById('val-roughness');
+      sliderRoughness.addEventListener('input', (e) => {
+        state.roughness = parseFloat(e.target.value);
+        valRoughness.textContent = state.roughness.toFixed(2);
+        computeNoiseField();
+        applyTerrainGeometry();
+      });
+
+      // 海面水位スライダー
+      const sliderWater = document.getElementById('slider-water');
+      const valWater = document.getElementById('val-water');
+      sliderWater.addEventListener('input', (e) => {
+        state.waterLevel = parseFloat(e.target.value);
+        valWater.textContent = `${state.waterLevel.toFixed(1)} m`;
+        applyTerrainGeometry();
+      });
+
+      // 太陽の高度（時間帯）スライダー
+      const sliderTime = document.getElementById('slider-time');
+      const valTime = document.getElementById('val-time');
+      sliderTime.addEventListener('input', (e) => {
+        state.timeOfDay = parseFloat(e.target.value);
+        valTime.textContent = formatTimeLabel(state.timeOfDay);
+        updateAtmosphere();
+      });
+
+      // ワイヤーフレーム表示トグル
+      document.getElementById('toggle-wireframe').addEventListener('change', (e) => {
+        state.wireframe = e.target.checked;
+        wireframeMesh.visible = state.wireframe;
+      });
+
+      // カメラ飛行モードボタン群
+      document.querySelectorAll('.cam-mode-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          setCameraMode(btn.dataset.camMode);
+        });
+      });
+
+      // 飛行スピードスライダー
+      const sliderSpeed = document.getElementById('slider-speed');
+      const valSpeed = document.getElementById('val-speed');
+      sliderSpeed.addEventListener('input', (e) => {
+        state.flightSpeed = parseFloat(e.target.value);
+        valSpeed.textContent = `${state.flightSpeed.toFixed(1)}x`;
+      });
+
+      // 録画中のUI非表示トグル
+      document.getElementById('toggle-clean-rec').addEventListener('change', (e) => {
+        state.cleanRec = e.target.checked;
+      });
+
+      // 動画録画開始 / 停止ボタン
+      document.getElementById('btn-rec-start').addEventListener('click', startRecording);
+      document.getElementById('btn-rec-stop').addEventListener('click', stopRecording);
+      document.getElementById('btn-clean-rec-stop').addEventListener('click', stopRecording);
+
+      // カメラ視点リセット
+      document.getElementById('btn-reset-cam').addEventListener('click', () => {
+        setCameraMode('manual');
+        camCtrl.target.set(0, 6, 0);
+        camCtrl.radius = 145;
+        camCtrl.theta = Math.PI * 0.25;
+        camCtrl.phi = Math.PI * 0.31;
+        updateCameraTransform();
+      });
+    }
+
+    /**
+     * ブラウザ内キャンバス録画の開始（MediaRecorder + captureStream）
+     */
+    function startRecording() {
+      if (recorderState.isRecording || !renderer) return;
+
+      const canvas = renderer.domElement;
+      if (!canvas.captureStream) {
+        document.getElementById('rec-status-msg').textContent = '※ お使いのブラウザはキャンバス録画に対応していません。';
+        return;
+      }
+
+      const stream = canvas.captureStream(30);
+      const mimeCandidates = [
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+        'video/mp4'
+      ];
+      let selectedMime = '';
+      for (const mime of mimeCandidates) {
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime)) {
+          selectedMime = mime;
+          break;
+        }
+      }
+
+      try {
+        recorderState.chunks = [];
+        recorderState.mediaRecorder = selectedMime
+          ? new MediaRecorder(stream, { mimeType: selectedMime, videoBitsPerSecond: 6000000 })
+          : new MediaRecorder(stream);
+
+        recorderState.mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            recorderState.chunks.push(e.data);
+          }
+        };
+
+        recorderState.mediaRecorder.onstop = () => {
+          const finalType = recorderState.mediaRecorder.mimeType || 'video/webm';
+          const ext = finalType.includes('mp4') ? 'mp4' : 'webm';
+          const blob = new Blob(recorderState.chunks, { type: finalType });
+          const url = URL.createObjectURL(blob);
+
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = url;
+          a.download = `poly-terrain-flight-${state.seed}.${ext}`;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }, 1500);
+
+          document.getElementById('rec-status-msg').textContent = `動画を保存しました（.${ext}形式）`;
+        };
+
+        recorderState.mediaRecorder.start(250);
+        recorderState.isRecording = true;
+        recorderState.startTime = Date.now();
+
+        // UI状態更新
+        const btnStart = document.getElementById('btn-rec-start');
+        const btnStop = document.getElementById('btn-rec-stop');
+        const recDot = document.getElementById('rec-dot');
+
+        btnStart.disabled = true;
+        btnStart.classList.add('opacity-50', 'cursor-not-allowed');
+        btnStop.disabled = false;
+        btnStop.classList.remove('bg-slate-800', 'text-slate-500', 'cursor-not-allowed');
+        btnStop.classList.add('bg-slate-700', 'hover:bg-slate-600', 'text-white', 'cursor-pointer');
+        recDot.classList.remove('bg-slate-500');
+        recDot.classList.add('bg-rose-500', 'animate-ping');
+
+        // クリーンビュー録画が有効な場合はHUDを隠してフローティング停止ピルを表示
+        if (state.cleanRec) {
+          document.getElementById('control-panel').classList.add('hidden');
+          document.getElementById('hud-guide').classList.add('hidden');
+          document.getElementById('clean-rec-pill').classList.remove('hidden');
+        }
+
+        recorderState.timerInterval = setInterval(updateRecordingTimer, 250);
+        updateRecordingTimer();
+      } catch (err) {
+        document.getElementById('rec-status-msg').textContent = '録画の開始に失敗しました。';
+      }
+    }
+
+    /**
+     * 録画経過時間タイマー表示の更新
+     */
+    function updateRecordingTimer() {
+      if (!recorderState.isRecording) return;
+      const elapsedSec = Math.floor((Date.now() - recorderState.startTime) / 1000);
+      const mm = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+      const ss = String(elapsedSec % 60).padStart(2, '0');
+      const formatted = `${mm}:${ss}`;
+      document.getElementById('rec-timer').textContent = formatted;
+      document.getElementById('clean-rec-timer').textContent = `REC ${formatted}`;
+    }
+
+    /**
+     * 録画停止とファイル保存トリガー
+     */
+    function stopRecording() {
+      if (!recorderState.isRecording || !recorderState.mediaRecorder) return;
+
+      recorderState.isRecording = false;
+      clearInterval(recorderState.timerInterval);
+      recorderState.mediaRecorder.stop();
+
+      // HUD復元
+      document.getElementById('control-panel').classList.remove('hidden');
+      document.getElementById('hud-guide').classList.remove('hidden');
+      document.getElementById('clean-rec-pill').classList.add('hidden');
+
+      const btnStart = document.getElementById('btn-rec-start');
+      const btnStop = document.getElementById('btn-rec-stop');
+      const recDot = document.getElementById('rec-dot');
+
+      btnStart.disabled = false;
+      btnStart.classList.remove('opacity-50', 'cursor-not-allowed');
+      btnStop.disabled = true;
+      btnStop.classList.add('bg-slate-800', 'text-slate-500', 'cursor-not-allowed');
+      btnStop.classList.remove('bg-slate-700', 'hover:bg-slate-600', 'text-white', 'cursor-pointer');
+      recDot.classList.remove('bg-rose-500', 'animate-ping');
+      recDot.classList.add('bg-slate-500');
+      document.getElementById('rec-timer').textContent = '00:00';
+    }
+
+    /**
+     * 時間表示テキストのフォーマット
+     */
+    function formatTimeLabel(t) {
+      const hours = Math.floor(t) % 24;
+      const mins = Math.floor((t - Math.floor(t)) * 60);
+      const hh = String(hours).padStart(2, '0');
+      const mm = String(mins).padStart(2, '0');
+
+      let period = '昼間';
+      if (t < 5.0 || t >= 19.5) period = '月夜';
+      else if (t < 7.2) period = '朝焼け';
+      else if (t < 11.0) period = '朝〜昼';
+      else if (t < 15.5) period = '真昼';
+      else if (t < 17.2) period = '午後';
+      else period = '夕焼け';
+
+      return `${hh}:${mm} ${period}`;
+    }
+
+    /**
+     * シード値表示更新
+     */
+    function updateSeedDisplay() {
+      document.getElementById('seed-display').textContent = `SEED: #${state.seed}`;
+    }
+
+    /**
+     * ウィンドウリサイズ対応
+     */
+    function onWindowResize() {
+      const container = document.getElementById('canvas-container');
+      if (!container || !camera || !renderer) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    /**
+     * メインアニメーションループ
+     */
+    let lastTime = 0;
+    function animate(now = 0) {
+      requestAnimationFrame(animate);
+      const dt = Math.min(0.05, (now - lastTime) * 0.001);
+      lastTime = now;
+
+      // カメラ飛行モードに応じた更新処理
+      if (!camCtrl.isDragging) {
+        if (state.cameraMode === 'orbit') {
+          camCtrl.theta += dt * 0.22 * state.flightSpeed;
+          camCtrl.phi = Math.PI * 0.32 + Math.sin(now * 0.00045) * 0.07;
+          updateCameraTransform();
+        } else if (state.cameraMode === 'freeflight') {
+          updateFreeFlight(dt, now * 0.001);
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // ウィンドウ読み込み完了後に初期化＆ループ開始
+    window.onload = function () {
+      init();
+      animate();
+    };
+  </script>
+</body>
+</html>
